@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>地圖投影演示</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 樣式部分保持不變 */
+        body { font-family: 'Inter', sans-serif; overflow: hidden; padding-bottom: 2.5rem; }
+        canvas, svg { display: block; width: 100%; height: 100%; border-radius: 0.5rem; }
+        #globe-container, #map-container { height: 400px; background-color: #f3f4f6; border-radius: 0.5rem; position: relative; }
+        .loader { border: 4px solid #f3f4f6; border-top: 4px solid #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10; }
+        @keyframes spin { 0% { transform: translate(-50%, -50%) rotate(0deg); } 100% { transform: translate(-50%, -50%) rotate(360deg); } }
+        select { appearance: none; background-image: url('data:image/svg+xml;charset=US-ASCII,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-chevron-down" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z"/></svg>'); background-repeat: no-repeat; background-position: right 0.5rem center; background-size: 1em; padding-right: 2rem; }
+        @media (min-width: 768px) { #visualization-container { display: flex; gap: 1rem; } #globe-container, #map-container { flex: 1; } }
+        .toggle-checkbox:checked + .toggle-label { background-color: #3b82f6; }
+        .toggle-checkbox:checked + .toggle-label::after { transform: translateX(calc(100% - 4px)); background-color: white; }
+        .toggle-label { transition: background-color 0.2s ease-in-out; }
+        .toggle-label::after { content: ''; position: absolute; top: 2px; left: 2px; width: 1.25rem; height: 1.25rem; background-color: white; border-radius: 50%; transition: transform 0.2s ease-in-out; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .error-message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #dc2626; background-color: rgba(255, 255, 255, 0.8); padding: 0.5rem 1rem; border-radius: 0.375rem; font-size: 0.875rem; text-align: center; z-index: 5; max-width: 90%; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-100 p-4 md:p-8">
+
+    <div class="max-w-7xl mx-auto bg-white p-6 rounded-lg shadow-md mb-10">
+        <h1 class="text-2xl font-semibold mb-4 text-center text-gray-800">地圖投影演示</h1>
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-8 mb-6">
+            <div class="flex items-center gap-2">
+                 <label for="projection-select" class="text-gray-700 font-medium">選擇地圖投影：</label>
+                 <select id="projection-select" class="p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white">
+                      <option value="Equirectangular">等距柱狀投影 (Equirectangular)</option>
+                      <option value="Mercator">麥卡托投影 (Mercator)</option>
+                      <option value="Mollweide">莫爾威投影 (Mollweide)</option>
+                      <option value="Orthographic">正射投影 (Orthographic)</option>
+                      <option value="LambertConformalConic">蘭伯特等角圓錐投影 (Lambert Conformal Conic)</option>
+                      <option value="Stereographic">極方位投影/球極平面投影 (Stereographic)</option>
+                      <option value="NaturalEarth1">羅賓森投影/自然地球投影 I (Natural Earth I)</option>
+                 </select>
+            </div>
+             <div class="flex items-center gap-2">
+                 <label for="indicatrix-toggle" class="text-gray-700 font-medium">顯示底索指示線:</label>
+                 <input type="checkbox" id="indicatrix-toggle" class="toggle-checkbox hidden">
+                 <label for="indicatrix-toggle" class="toggle-label block w-10 h-6 bg-gray-300 rounded-full cursor-pointer relative"></label>
+             </div>
+        </div>
+        <div id="visualization-container" class="flex flex-col md:flex-row gap-4 mb-4">
+            <div id="globe-container" class="bg-gray-200 rounded-lg overflow-hidden relative md:flex-1 cursor-grab active:cursor-grabbing">
+                <div class="loader" id="globe-loader"></div>
+                <canvas id="globe-canvas"></canvas>
+                <div id="globe-error-message" class="error-message hidden"></div>
+                <p class="absolute bottom-2 left-2 text-xs bg-black bg-opacity-50 text-white px-2 py-1 rounded z-20">3D 地球模型 (可拖曳旋轉)</p>
+            </div>
+            <div id="map-container" class="bg-gray-200 rounded-lg overflow-hidden relative md:flex-1">
+                 <div class="loader" id="map-loader"></div>
+                 <svg id="map-svg"></svg>
+                 <div id="map-error-message" class="error-message hidden"></div>
+                 <p class="absolute bottom-2 left-2 text-xs bg-black bg-opacity-50 text-white px-2 py-1 rounded z-20">2D 投影地圖 (隨地球旋轉更新)</p>
+            </div>
+        </div>
+        <div id="projection-info" class="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg text-gray-700 min-h-[100px]">
+            <h3 class="font-semibold text-lg mb-2 text-blue-800">投影說明：</h3>
+            <p id="info-text">請選擇一種地圖投影方式以查看說明。</p>
+        </div>
+    </div>
+    <p class="fixed bottom-0 left-0 right-0 text-sm text-gray-500 text-center pb-2 bg-gray-100 pt-1 z-10">妙妙老師製作</p>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://d3js.org/topojson.v3.min.js"></script>
+    <script src="https://d3js.org/d3-geo-projection.v4.min.js"></script>
+
+    <script>
+        // --- 全域變數 (保持不變) ---
+        let scene, camera, renderer, globe, controls, equatorLine;
+        let projection, pathGenerator, mapSvg, mapGroup;
+        let geojsonData = null; // 初始為 null，等待載入
+        let currentRotation = [0, 0, 0];
+        let throttleTimer = null;
+        const THROTTLE_DELAY = 50;
+        const spherical = new THREE.Spherical();
+
+        // DOM 元素獲取 (保持不變)
+        const globeContainer = document.getElementById('globe-container');
+        const mapContainer = document.getElementById('map-container');
+        const globeCanvas = document.getElementById('globe-canvas');
+        const mapSvgElement = document.getElementById('map-svg');
+        const projectionSelect = document.getElementById('projection-select');
+        const infoText = document.getElementById('info-text');
+        const indicatrixToggle = document.getElementById('indicatrix-toggle');
+        const globeErrorMessage = document.getElementById('globe-error-message');
+        const mapErrorMessage = document.getElementById('map-error-message');
+        const globeLoader = document.getElementById('globe-loader');
+        const mapLoader = document.getElementById('map-loader'); // 保留 map loader
+
+        // --- 投影說明文字 (保持不變) ---
+        const projectionDescriptions = {
+            Equirectangular: "等距柱狀投影 (Plate Carrée)：經緯線都是等距直線，在高緯度地區有嚴重的拉伸變形。常用於簡單的世界地圖或索引圖。旋轉時通常表現為水平平移。",
+            Mercator: "麥卡托投影：等角投影，保持角度和局部形狀正確，但面積在高緯度地區嚴重放大。常用於航海圖。旋轉時通常表現為水平平移。",
+            Mollweide: "莫爾威投影：一種等積偽圓柱投影，保持面積正確，但形狀和角度在高緯度地區和邊緣地區變形較大。常用於需要準確表示全球面積分佈的地圖。旋轉時通常表現為水平平移。",
+            Orthographic: "正射投影：從無限遠處觀看地球的視角，呈現地球的真實球面外觀，只顯示半個地球，邊緣有壓縮變形。能良好地隨地球旋轉更新視角。",
+            LambertConformalConic: "蘭伯特等角圓錐投影：一種圓錐投影，保持角度正確（等角），在中緯度地區（尤其東西延伸區域）的形狀和面積變形較小。常用於製作區域地圖。旋轉時會改變中央經線。",
+            Stereographic: "極方位投影/球極平面投影：等角投影，常用於極地地區地圖，形狀在局部保持正確，但面積和距離會變形。能良好地隨地球旋轉更新視角。",
+            NaturalEarth1: "羅賓森投影/自然地球投影 I：一種偽柱狀投影，試圖在形狀和面積之間取得平衡，視覺上變形較小，是一種折衷投影方式。常用於製作視覺效果良好的世界地圖。旋轉時可能表現為水平平移。"
+        };
+
+        // --- 顯示錯誤訊息的輔助函式 (保持不變) ---
+        function showErrorMessage(element, message) { if(element){ const displayMessage = String(message || '未知錯誤'); element.textContent = displayMessage; element.classList.remove('hidden'); } }
+        function hideErrorMessage(element) { if(element) { element.classList.add('hidden'); } }
+
+        // --- 初始化函式 ---
+
+        // 初始化 3D 地球 (內容不變)
+        function initGlobe() {
+             try {
+                 hideErrorMessage(globeErrorMessage);
+                 scene = new THREE.Scene(); scene.background = new THREE.Color(0xf3f4f6);
+                 const aspect = globeContainer.clientWidth / globeContainer.clientHeight;
+                 camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000); camera.position.z = 2.1;
+                 if (!globeCanvas) throw new Error("Globe canvas element not found.");
+                 renderer = new THREE.WebGLRenderer({ canvas: globeCanvas, antialias: true }); renderer.setSize(globeContainer.clientWidth, globeContainer.clientHeight); renderer.setPixelRatio(window.devicePixelRatio);
+                 const geometry = new THREE.SphereGeometry(1, 64, 32);
+                 const textureLoader = new THREE.TextureLoader(); textureLoader.setCrossOrigin('anonymous');
+                 const primaryTextureUrl = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-day.jpg';
+                 const LOAD_TIMEOUT = 8000;
+                 let initializationTimeout = null;
+                 let isInitialized = false;
+                 const handleInitializationComplete = (material) => { if (isInitialized) return; isInitialized = true; clearTimeout(initializationTimeout); try { globe = new THREE.Mesh(geometry, material); scene.add(globe); addEquator(); setupControlsAndResize(); animate(); } catch (finalInitError) { console.error("Error during final globe initialization steps:", finalInitError); showErrorMessage(globeErrorMessage, `初始化 3D 地球最終步驟失敗: ${finalInitError.message || finalInitError}`); } finally { if(globeLoader) globeLoader.style.display = 'none'; } }; // 確保 loader 隱藏
+                 textureLoader.load( primaryTextureUrl, (texture) => { console.log(`主要地球紋理 (${primaryTextureUrl}) 載入成功`); handleInitializationComplete(new THREE.MeshBasicMaterial({ map: texture })); }, undefined, (error) => { console.error(`無法載入主要地球紋理 (${primaryTextureUrl}):`, error); console.log("紋理載入失敗，顯示純藍色地球。"); handleInitializationComplete(new THREE.MeshBasicMaterial({ color: 0x2288ff })); } );
+                 initializationTimeout = setTimeout(() => { if (isInitialized) return; console.warn(`紋理載入超時 (${LOAD_TIMEOUT / 1000}秒)，顯示純藍色地球。`); handleInitializationComplete(new THREE.MeshBasicMaterial({ color: 0x2288ff })); }, LOAD_TIMEOUT);
+                 function addEquator() { const equatorRadius = 1.005; const segments = 128; const points = []; for (let i = 0; i <= segments; i++) { const theta = (i / segments) * Math.PI * 2; points.push(new THREE.Vector3(Math.cos(theta) * equatorRadius, 0, Math.sin(theta) * equatorRadius)); } const equatorGeometry = new THREE.BufferGeometry().setFromPoints(points); const equatorMaterial = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 }); equatorLine = new THREE.Line(equatorGeometry, equatorMaterial); scene.add(equatorLine); }
+                 function setupControlsAndResize() { if (typeof THREE.OrbitControls === 'function') { controls = new THREE.OrbitControls(camera, renderer.domElement); controls.enableDamping = true; controls.dampingFactor = 0.05; controls.enableZoom = false; controls.enablePan = false; controls.minPolarAngle = 0; controls.maxPolarAngle = Math.PI; controls.addEventListener('change', handleOrbitChange); } else { console.warn("OrbitControls 未正確載入。"); } window.addEventListener('resize', onWindowResize, false); onWindowResize(); }
+             } catch (error) { console.error("初始化 3D 地球時發生嚴重錯誤:", error); showErrorMessage(globeErrorMessage, `初始化 3D 地球失敗: ${error.message || error}`); if(globeLoader) globeLoader.style.display = 'none'; }
+        }
+
+        // ***** 修改後的 initMap 函式 *****
+        function initMap() {
+             try {
+                 hideErrorMessage(mapErrorMessage); // 先隱藏可能的舊錯誤
+                 if(mapLoader) mapLoader.style.display = 'block'; // 確保 loader 可見
+
+                 mapSvg = d3.select("#map-svg");
+                 if (mapSvg.empty()) throw new Error("Map SVG element (#map-svg) not found.");
+
+                 const width = mapContainer.clientWidth; const height = mapContainer.clientHeight;
+                 if (width <= 0 || height <= 0) {
+                     console.warn("Map container has zero dimensions during initMap.");
+                     // 即使尺寸無效，也嘗試設定 viewBox 以便稍後 resize 更新
+                     mapSvg.attr("viewBox", `0 0 100 100`).attr("preserveAspectRatio", "xMidYMid meet");
+                 } else {
+                    mapSvg.attr("viewBox", `0 0 ${width} ${height}`).attr("preserveAspectRatio", "xMidYMid meet");
+                 }
+
+                 // 清除可能存在的舊地圖元素
+                 mapSvg.selectAll("g").remove();
+                 // 創建新的 mapGroup
+                 mapGroup = mapSvg.append("g");
+                 mapGroup.append("rect").attr("width", "100%").attr("height", "100%").style("fill", "none").style("pointer-events", "all"); // 使用百分比確保填滿
+
+                 updateProjection(); // 設定初始投影和 pathGenerator
+
+                 // ***** 立即繪製經緯網和球體外框 *****
+                 console.log("立即繪製地圖背景...");
+                 try {
+                     // 確保 pathGenerator 存在
+                     if (pathGenerator && mapGroup) {
+                         // 繪製經緯網
+                         const graticule = d3.geoGraticule();
+                         mapGroup.append("path")
+                             .datum(graticule)
+                             .attr("class", "graticule") // 使用 class 以便後續 drawMap 清除
+                             .attr("d", pathGenerator)
+                             .style("fill", "none")
+                             .style("stroke", "#ccc")
+                             .style("stroke-width", 0.5);
+
+                         // 繪製初始球體外框 (如果適用)
+                         if (projection.clipAngle && projection.clipAngle() === 90 || ['Stereographic', 'Orthographic', 'Mollweide'].includes(projectionSelect.value)) {
+                              mapGroup.append("path")
+                                  .datum({type: "Sphere"})
+                                  .attr("class", "sphere") // 使用 class
+                                  .attr("d", pathGenerator)
+                                  .style("fill", "none")
+                                  .style("stroke", "#555")
+                                  .style("stroke-width", 1.5);
+                         }
+                         console.log("地圖背景繪製完成。");
+                     } else {
+                         console.warn("無法立即繪製地圖背景，缺少 pathGenerator 或 mapGroup。");
+                     }
+                 } catch (bgError) {
+                     console.error("繪製地圖背景時出錯:", bgError);
+                     showErrorMessage(mapErrorMessage, `繪製地圖背景失敗: ${bgError.message || bgError}`);
+                 }
+
+
+                 // ***** 恢復使用 d3.json 載入地理資料 *****
+                 const geoDataUrl = "https://unpkg.com/world-atlas@2/countries-50m.json";
+                 console.log(`開始載入地理資料: ${geoDataUrl}`);
+
+                 d3.json(geoDataUrl).then(world => {
+                     console.log("地理資料載入成功");
+                     geojsonData = topojson.feature(world, world.objects.countries);
+                     if(mapLoader) mapLoader.style.display = 'none'; // 載入成功後隱藏 loader
+                     drawMap(); // 使用載入的資料繪製完整地圖
+                 }).catch(error => {
+                     console.error(`無法載入地理資料 (${geoDataUrl}):`, error);
+                     if(mapLoader) mapLoader.style.display = 'none'; // 載入失敗也要隱藏 loader
+                     showErrorMessage(mapErrorMessage, `無法載入地圖資料: ${error.message || error}`);
+                 });
+
+                 window.addEventListener('resize', onWindowResizeMap, false);
+
+             } catch (error) {
+                 // 捕捉初始化過程中的其他錯誤
+                 console.error("初始化 2D 地圖時出錯:", error);
+                 if(mapLoader) mapLoader.style.display = 'none'; // 出錯時確保 loader 隱藏
+                 showErrorMessage(mapErrorMessage, `初始化 2D 地圖失敗: ${error.message || error}`);
+             }
+        }
+
+        // --- 更新與繪製函式 ---
+
+        // updateProjection (內容不變)
+        function updateProjection() {
+           try {
+               if (!infoText) { console.error("..."); return; }
+               const selectedValue = projectionSelect.value;
+               const width = mapContainer.clientWidth; const height = mapContainer.clientHeight;
+               if (!width || !height || width <= 0 || height <= 0) { console.warn("..."); return; }
+
+               switch (selectedValue) {
+                   case 'Mercator': projection = d3.geoMercator().scale(Math.min(width, height) / (2 * Math.PI) * 0.9).translate([width / 2, height / 2]); break;
+                   case 'Mollweide': projection = d3.geoMollweide().scale(width / (2 * Math.sqrt(2)) * 0.45).translate([width / 2, height / 2]); break;
+                   case 'Orthographic': projection = d3.geoOrthographic().scale(Math.min(width, height) / 2 * 0.9).translate([width / 2, height / 2]).clipAngle(90); break;
+                   case 'LambertConformalConic': projection = d3.geoConicConformal().parallels([30, 60]).scale(Math.min(width, height) * 0.4).translate([width / 2, height / 2]); break;
+                   case 'Stereographic': projection = d3.geoStereographic().scale(Math.min(width, height) / 2 * 0.9).translate([width / 2, height / 2]).clipAngle(170); break;
+                   case 'NaturalEarth1': projection = d3.geoNaturalEarth1().scale(width / (1.8 * Math.PI)).translate([width / 2, height / 2]); break;
+                   case 'Equirectangular': default: projection = d3.geoEquirectangular().scale(width / (2 * Math.PI) * 0.95).translate([width / 2, height / 2]); break;
+               }
+               if (!projection) { throw new Error(`無法創建投影: ${selectedValue}`); }
+               if (projection.rotate) { if (Array.isArray(currentRotation) && currentRotation.length === 3) { projection.rotate(currentRotation); } else { console.warn("..."); projection.rotate([0, 0, 0]); } }
+               pathGenerator = d3.geoPath().projection(projection);
+               const description = projectionDescriptions[selectedValue] || "未知的投影方式。"; infoText.textContent = description;
+               // 只有在 geojsonData 已載入時才呼叫 drawMap
+               if (geojsonData) { drawMap(); }
+               else {
+                   // 如果 geojsonData 還沒載入 (例如初始載入時)，先繪製背景
+                   console.log("GeoJSON data not loaded yet in updateProjection, drawing background only.");
+                   drawMapBackgroundOnly(); // 呼叫只繪製背景的函式
+               }
+           } catch (error) { console.error("...", error); const errorMessage = error?.message || error?.toString() || '未知錯誤'; showErrorMessage(mapErrorMessage, `更新投影失敗: ${errorMessage}`); if(infoText) infoText.textContent = "讀取投影說明時發生錯誤。"; }
+        }
+
+        // ***** 新增：只繪製地圖背景的函式 *****
+        function drawMapBackgroundOnly() {
+            if (!mapGroup || !pathGenerator || !projection) {
+                console.warn("Skipping drawMapBackgroundOnly due to missing prerequisites.");
+                return;
+            }
+            try {
+                // 清除舊的背景元素 (如果有的話)
+                mapGroup.selectAll(".graticule").remove();
+                mapGroup.selectAll(".sphere").remove();
+
+                // 繪製經緯網
+                const graticule = d3.geoGraticule();
+                mapGroup.append("path")
+                    .datum(graticule)
+                    .attr("class", "graticule")
+                    .attr("d", pathGenerator)
+                    .style("fill", "none")
+                    .style("stroke", "#ccc")
+                    .style("stroke-width", 0.5);
+
+                // 繪製球體外框
+                if (projection.clipAngle && projection.clipAngle() === 90 || ['Stereographic', 'Orthographic', 'Mollweide'].includes(projectionSelect.value)) {
+                     mapGroup.append("path")
+                         .datum({type: "Sphere"})
+                         .attr("class", "sphere")
+                         .attr("d", pathGenerator)
+                         .style("fill", "none")
+                         .style("stroke", "#555")
+                         .style("stroke-width", 1.5);
+                }
+            } catch (error) {
+                console.error("繪製地圖背景時出錯:", error);
+                showErrorMessage(mapErrorMessage, `繪製地圖背景失敗: ${error.message || error}`);
+            }
+        }
+
+
+        // drawMap (現在主要繪製國家和指示線)
+        function drawMap() {
+            console.time(`drawMap-${projectionSelect.value}`);
+            // 必須有 geojsonData 才能繼續
+            if (!geojsonData || !mapGroup || !pathGenerator || !projection) {
+                console.warn("Skipping drawMap due to missing prerequisites (maybe geojsonData not loaded yet):",
+                             { geojsonData: !!geojsonData, mapGroup: !!mapGroup, pathGenerator: !!pathGenerator, projection: !!projection });
+                console.timeEnd(`drawMap-${projectionSelect.value}`);
+                return;
+            }
+            try {
+                hideErrorMessage(mapErrorMessage);
+                // 清除舊的國家和指示線，保留背景
+                mapGroup.selectAll(".country").remove();
+                mapGroup.selectAll(".indicatrix").remove();
+
+                // ***** 先繪製背景 (確保切換投影時背景也更新) *****
+                drawMapBackgroundOnly();
+
+                // 繪製國家邊界
+                mapGroup.selectAll(".country")
+                    .data(geojsonData.features)
+                    .enter().append("path")
+                    .attr("class", "country")
+                    .attr("d", pathGenerator)
+                    .style("fill", "#e5e7eb")
+                    .style("stroke", "#6b7280")
+                    .style("stroke-width", 0.5);
+
+                // 繪製底索指示線
+                const showIndicatrix = indicatrixToggle.checked;
+                if (showIndicatrix) {
+                    const indicatrixData = [];
+                    const step = 30; const radius = 5;
+                    for (let lat = -60; lat <= 60; lat += step) {
+                        for (let lon = -180; lon < 180; lon += step) {
+                            const circle = d3.geoCircle().center([lon, lat]).radius(radius);
+                            indicatrixData.push(circle());
+                        }
+                    }
+                    mapGroup.selectAll(".indicatrix")
+                        .data(indicatrixData)
+                        .enter().append("path")
+                        .attr("class", "indicatrix")
+                        .attr("d", pathGenerator)
+                        .style("fill", "none")
+                        .style("stroke", "red")
+                        .style("stroke-width", 0.8);
+                }
+            } catch (error) {
+                 console.error("繪製 2D 地圖 (國家/指示線) 時出錯:", error);
+                 const errorMessage = error?.message || error?.toString() || '未知繪圖錯誤';
+                 showErrorMessage(mapErrorMessage, `繪製地圖失敗: ${errorMessage}`);
+            } finally {
+                 console.timeEnd(`drawMap-${projectionSelect.value}`);
+            }
+        }
+
+        // --- 動畫與事件處理 (內容不變) ---
+        function animate() { if (!renderer || !scene || !camera) { console.warn("..."); return; } requestAnimationFrame(animate); try { if (controls) { controls.update(); } renderer.render(scene, camera); } catch (animError) { console.error("...", animError); } }
+        function handleOrbitChange() { if (throttleTimer) return; throttleTimer = setTimeout(() => { if (camera && projection && projection.rotate) { try { spherical.setFromVector3(camera.position); let longitude = -THREE.MathUtils.radToDeg(spherical.theta) + 90; let latitude_for_d3 = THREE.MathUtils.radToDeg(spherical.phi) - 90; while (longitude > 180) longitude -= 360; while (longitude <= -180) longitude += 360; currentRotation = [longitude, latitude_for_d3, 0]; projection.rotate(currentRotation); drawMap(); } catch (calcError) { console.error("...", calcError); const errorMessage = calcError?.message || calcError?.toString() || '未知計算錯誤'; showErrorMessage(mapErrorMessage, `計算旋轉角度失敗: ${errorMessage}`); } } throttleTimer = null; }, THROTTLE_DELAY); }
+        function onWindowResize() { try { if (camera && renderer && globeContainer) { const width = globeContainer.clientWidth; const height = globeContainer.clientHeight; if (width > 0 && height > 0) { camera.aspect = width / height; camera.updateProjectionMatrix(); renderer.setSize(width, height); } } } catch(e){ console.error("...", e); } }
+        function onWindowResizeMap() { try { if (mapSvg && mapContainer) { const width = mapContainer.clientWidth; const height = mapContainer.clientHeight; if (width > 0 && height > 0) { mapSvg.attr("viewBox", `0 0 ${width} ${height}`); updateProjection(); } else { console.warn("..."); } } } catch(e){ console.error("...", e); } }
+
+        // --- 初始化執行 (內容不變) ---
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!infoText) { console.error("..."); }
+            initGlobe();
+            initMap();
+        });
+
+        // --- 事件監聽 (內容不變) ---
+        if (projectionSelect) { projectionSelect.addEventListener('change', updateProjection); }
+        // ***** 修改：切換指示線時只需重繪，不需要更新整個投影 *****
+        if (indicatrixToggle) { indicatrixToggle.addEventListener('change', () => {
+            // 只需重繪地圖即可反應指示線的變化
+            if (geojsonData) { // 確保資料已載入
+                 drawMap();
+            }
+        }); }
+
+    </script>
+
+</body>
+</html>
